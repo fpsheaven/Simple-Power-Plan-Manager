@@ -69,7 +69,11 @@ const FPSHEAVEN_POWER_PLANS_URL: &str =
     "https://fpsheaven.com/wp-content/uploads/2026/06/fpsheaven_powerplans.zip";
 const FPSHEAVEN_POWER_PLANS_ZIP_FILE: &str = "fpsheaven_powerplans.zip";
 const FPSHEAVEN_POWER_PLANS_FOLDER: &str = "FPSHEAVEN Power Plans";
+const APP_DATA_FOLDER: &str = "Simple Power Plan Manager";
+const FPSHEAVEN_DOWNLOADS_FOLDER: &str = "FPSHEAVEN Downloads";
 const TOOLBAR_BUTTON_HEIGHT: f32 = 30.0;
+const FPSHEAVEN_IMPORT_BUSY_MESSAGE: &str =
+    "FPSHEAVEN power plan import is running; wait for it to finish";
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -244,6 +248,10 @@ impl PowerPlanApp {
     }
 
     fn reload_with_status(&mut self, success_message: impl Into<String>) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         match self.reload() {
             Ok(()) => self.status = StatusMessage::success(success_message),
             Err(error) => self.status = StatusMessage::error(error),
@@ -260,6 +268,19 @@ impl PowerPlanApp {
         self.sync_rename_text();
     }
 
+    fn fpsheaven_import_running(&self) -> bool {
+        self.fpsheaven_import_job.is_some()
+    }
+
+    fn block_if_fpsheaven_import_running(&mut self) -> bool {
+        if self.fpsheaven_import_running() {
+            self.status = StatusMessage::info(FPSHEAVEN_IMPORT_BUSY_MESSAGE);
+            true
+        } else {
+            false
+        }
+    }
+
     fn sync_rename_text(&mut self) {
         let selected = self.selected_plan().cloned();
         self.rename_text = selected
@@ -270,6 +291,10 @@ impl PowerPlanApp {
     }
 
     fn import_plans(&mut self) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         let Some(paths) = FileDialog::new()
             .add_filter("Power plan", &["pow"])
             .set_title("Import power plan")
@@ -307,6 +332,10 @@ impl PowerPlanApp {
     }
 
     fn export_selected_plan(&mut self) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         let Some(plan) = self.selected_plan().cloned() else {
             self.status = StatusMessage::error("Select a power plan first");
             return;
@@ -335,6 +364,10 @@ impl PowerPlanApp {
     }
 
     fn export_all_plans(&mut self) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         if self.plans.is_empty() {
             self.status = StatusMessage::error("No power plans to export");
             return;
@@ -374,6 +407,10 @@ impl PowerPlanApp {
     }
 
     fn activate_selected_plan(&mut self) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         let Some(plan) = self.selected_plan().cloned() else {
             self.status = StatusMessage::error("Select a power plan first");
             return;
@@ -389,6 +426,10 @@ impl PowerPlanApp {
     }
 
     fn duplicate_selected_plan(&mut self) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         let Some(plan) = self.selected_plan().cloned() else {
             self.status = StatusMessage::error("Select a power plan first");
             return;
@@ -407,6 +448,10 @@ impl PowerPlanApp {
     }
 
     fn save_selected_plan_metadata(&mut self) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         let Some(plan) = self.selected_plan().cloned() else {
             self.status = StatusMessage::error("Select a power plan first");
             return;
@@ -433,6 +478,10 @@ impl PowerPlanApp {
     }
 
     fn delete_selected_plan(&mut self) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         let Some(plan) = self.selected_plan().cloned() else {
             self.status = StatusMessage::error("Select a power plan first");
             return;
@@ -446,6 +495,10 @@ impl PowerPlanApp {
     }
 
     fn delete_plan(&mut self, guid: &str) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         let Some(plan) = self.plans.iter().find(|plan| plan.guid == guid).cloned() else {
             self.status = StatusMessage::error("Power plan no longer exists");
             return;
@@ -466,6 +519,10 @@ impl PowerPlanApp {
     }
 
     fn open_windows_editor(&mut self) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         let Some(plan) = self.selected_plan().cloned() else {
             self.status = StatusMessage::error("Select a power plan first");
             return;
@@ -491,6 +548,10 @@ impl PowerPlanApp {
     }
 
     fn enable_default_windows_plans(&mut self) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         let missing_defaults = missing_default_power_plans(&self.plans);
 
         if missing_defaults.is_empty() {
@@ -535,6 +596,10 @@ impl PowerPlanApp {
     }
 
     fn reset_default_windows_plans_anyway(&mut self) {
+        if self.block_if_fpsheaven_import_running() {
+            return;
+        }
+
         if let Err(error) = self.reload() {
             self.status = StatusMessage::error(error);
             return;
@@ -634,26 +699,36 @@ impl PowerPlanApp {
             .selected_plan()
             .map(|plan| !plan.active)
             .unwrap_or(false);
-        let fpsheaven_import_running = self.fpsheaven_import_job.is_some();
+        let fpsheaven_import_running = self.fpsheaven_import_running();
+        let can_run_power_plan_action = !fpsheaven_import_running;
 
         ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
 
         ui.horizontal_wrapped(|ui| {
-            if toolbar_button(ui, "Refresh", 86.0).clicked() {
+            if toolbar_enabled_button(ui, can_run_power_plan_action, "Refresh", 86.0).clicked() {
                 self.reload_with_status("Refreshed power plans");
             }
 
-            if toolbar_button(ui, "Restore Defaults", 132.0).clicked() {
+            if toolbar_enabled_button(ui, can_run_power_plan_action, "Restore Defaults", 132.0)
+                .clicked()
+            {
                 self.enable_default_windows_plans();
             }
 
             toolbar_separator(ui);
 
-            if toolbar_button(ui, "Import", 86.0).clicked() {
+            if toolbar_enabled_button(ui, can_run_power_plan_action, "Import", 86.0).clicked() {
                 self.import_plans();
             }
 
-            if toolbar_enabled_button(ui, !self.plans.is_empty(), "Export All", 104.0).clicked() {
+            if toolbar_enabled_button(
+                ui,
+                can_run_power_plan_action && !self.plans.is_empty(),
+                "Export All",
+                104.0,
+            )
+            .clicked()
+            {
                 self.export_all_plans();
             }
 
@@ -661,7 +736,7 @@ impl PowerPlanApp {
 
             if toolbar_enabled_button(
                 ui,
-                !fpsheaven_import_running,
+                can_run_power_plan_action,
                 "Download FPSHEAVEN's power plan",
                 270.0,
             )
@@ -680,11 +755,25 @@ impl PowerPlanApp {
         ui.horizontal_wrapped(|ui| {
             toolbar_label(ui, "Selected");
 
-            if toolbar_enabled_button(ui, has_selection, "Export", 92.0).clicked() {
+            if toolbar_enabled_button(
+                ui,
+                can_run_power_plan_action && has_selection,
+                "Export",
+                92.0,
+            )
+            .clicked()
+            {
                 self.export_selected_plan();
             }
 
-            if toolbar_enabled_button(ui, can_delete_selected, "Delete", 92.0).clicked() {
+            if toolbar_enabled_button(
+                ui,
+                can_run_power_plan_action && can_delete_selected,
+                "Delete",
+                92.0,
+            )
+            .clicked()
+            {
                 self.delete_selected_plan();
             }
         });
@@ -735,6 +824,7 @@ impl PowerPlanApp {
             return;
         };
 
+        let can_run_power_plan_action = !self.fpsheaven_import_running();
         let mut cancel = false;
         let mut reset = false;
 
@@ -754,7 +844,8 @@ impl PowerPlanApp {
                 ui.add_space(14.0);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
-                        .add(
+                        .add_enabled(
+                            can_run_power_plan_action,
                             Button::new(RichText::new("Reset Anyway").color(Color32::WHITE))
                                 .fill(Color32::from_rgb(190, 55, 45)),
                         )
@@ -828,6 +919,7 @@ impl PowerPlanApp {
             });
             return;
         };
+        let can_run_power_plan_action = !self.fpsheaven_import_running();
 
         ui.horizontal(|ui| {
             ui.heading(&plan.name);
@@ -861,7 +953,9 @@ impl PowerPlanApp {
 
             let metadata_changed = self.rename_text.trim() != plan.name.as_str()
                 || self.description_text.trim() != plan.description.as_str();
-            let can_save = !self.rename_text.trim().is_empty() && metadata_changed;
+            let can_save = can_run_power_plan_action
+                && !self.rename_text.trim().is_empty()
+                && metadata_changed;
             if ui.add_enabled(can_save, Button::new("Save")).clicked() {
                 self.save_selected_plan_metadata();
             }
@@ -880,26 +974,41 @@ impl PowerPlanApp {
 
         ui.horizontal_wrapped(|ui| {
             if ui
-                .add_enabled(!plan.active, Button::new("Activate"))
+                .add_enabled(
+                    can_run_power_plan_action && !plan.active,
+                    Button::new("Activate"),
+                )
                 .clicked()
             {
                 self.activate_selected_plan();
             }
 
-            if ui.button("Duplicate").clicked() {
+            if ui
+                .add_enabled(can_run_power_plan_action, Button::new("Duplicate"))
+                .clicked()
+            {
                 self.duplicate_selected_plan();
             }
 
-            if ui.button("Activate & Edit").clicked() {
+            if ui
+                .add_enabled(can_run_power_plan_action, Button::new("Activate & Edit"))
+                .clicked()
+            {
                 self.open_windows_editor();
             }
 
-            if ui.button("Export").clicked() {
+            if ui
+                .add_enabled(can_run_power_plan_action, Button::new("Export"))
+                .clicked()
+            {
                 self.export_selected_plan();
             }
 
             if ui
-                .add_enabled(!plan.active, Button::new("Delete"))
+                .add_enabled(
+                    can_run_power_plan_action && !plan.active,
+                    Button::new("Delete"),
+                )
                 .clicked()
             {
                 self.delete_selected_plan();
@@ -919,6 +1028,7 @@ impl PowerPlanApp {
             .map(|plan| plan.name.clone())
             .unwrap_or_else(|| "Selected plan".to_owned());
 
+        let can_run_power_plan_action = !self.fpsheaven_import_running();
         let mut cancel = false;
         let mut delete = false;
 
@@ -934,7 +1044,8 @@ impl PowerPlanApp {
                 ui.add_space(14.0);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
-                        .add(
+                        .add_enabled(
+                            can_run_power_plan_action,
                             Button::new(RichText::new("Delete").color(Color32::WHITE))
                                 .fill(Color32::from_rgb(190, 55, 45)),
                         )
@@ -1168,17 +1279,20 @@ fn is_default_windows_plan(plan: &PowerPlan) -> bool {
 
 fn import_power_plan(path: &Path) -> Result<(), String> {
     ensure_windows()?;
-    run_powercfg(&[OsString::from("/import"), path.as_os_str().to_os_string()]).map(|_| ())
+    run_powercfg(&import_power_plan_args(path, None)).map(|_| ())
 }
 
 fn import_power_plan_with_guid(path: &Path, guid: &str) -> Result<(), String> {
     ensure_windows()?;
-    run_powercfg(&[
-        OsString::from("/import"),
-        path.as_os_str().to_os_string(),
-        OsString::from(guid),
-    ])
-    .map(|_| ())
+    run_powercfg(&import_power_plan_args(path, Some(guid))).map(|_| ())
+}
+
+fn import_power_plan_args(path: &Path, guid: Option<&str>) -> Vec<OsString> {
+    let mut args = vec![OsString::from("/import"), path.as_os_str().to_os_string()];
+    if let Some(guid) = guid {
+        args.push(OsString::from(guid));
+    }
+    args
 }
 
 fn download_extract_and_import_fpsheaven_power_plan(
@@ -1186,9 +1300,9 @@ fn download_extract_and_import_fpsheaven_power_plan(
 ) -> Result<FpsheavenImportResult, String> {
     ensure_windows()?;
 
-    let desktop = desktop_dir()?;
-    let zip_path = desktop.join(FPSHEAVEN_POWER_PLANS_ZIP_FILE);
-    let extract_dir = desktop.join(FPSHEAVEN_POWER_PLANS_FOLDER);
+    let download_dir = fpsheaven_download_dir()?;
+    let zip_path = download_dir.join(FPSHEAVEN_POWER_PLANS_ZIP_FILE);
+    let extract_dir = download_dir.join(FPSHEAVEN_POWER_PLANS_FOLDER);
 
     download_file(FPSHEAVEN_POWER_PLANS_URL, &zip_path)?;
     extract_zip(&zip_path, &extract_dir)?;
@@ -1208,18 +1322,37 @@ fn download_extract_and_import_fpsheaven_power_plan(
     })
 }
 
-fn desktop_dir() -> Result<PathBuf, String> {
-    let output = run_powershell_script("[Environment]::GetFolderPath('Desktop')")?;
-    let path = PathBuf::from(output.trim());
+fn fpsheaven_download_dir() -> Result<PathBuf, String> {
+    let base_dir = fpsheaven_download_base_dir();
+    fpsheaven_download_dir_under(&base_dir)
+}
 
-    if path.as_os_str().is_empty() {
-        return Err("Could not find the Windows Desktop folder".to_owned());
-    }
+fn fpsheaven_download_base_dir() -> PathBuf {
+    fpsheaven_download_base_dir_from(env::var_os("LOCALAPPDATA"))
+}
 
+fn fpsheaven_download_base_dir_from(local_app_data: Option<OsString>) -> PathBuf {
+    local_app_data
+        .map(PathBuf::from)
+        .unwrap_or_else(env::temp_dir)
+}
+
+fn fpsheaven_download_dir_under(base_dir: &Path) -> Result<PathBuf, String> {
+    let path = base_dir
+        .join(APP_DATA_FOLDER)
+        .join(FPSHEAVEN_DOWNLOADS_FOLDER);
+
+    fs::create_dir_all(&path)
+        .map_err(|error| format!("Could not create FPSHEAVEN download folder: {error}"))?;
     Ok(path)
 }
 
 fn download_file(url: &str, destination: &Path) -> Result<(), String> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create download folder: {error}"))?;
+    }
+
     let script = format!(
         "$ErrorActionPreference = 'Stop'; \
          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
@@ -1232,6 +1365,11 @@ fn download_file(url: &str, destination: &Path) -> Result<(), String> {
 }
 
 fn extract_zip(zip_path: &Path, destination: &Path) -> Result<(), String> {
+    if destination.exists() {
+        fs::remove_dir_all(destination)
+            .map_err(|error| format!("Could not clear old extract folder: {error}"))?;
+    }
+
     fs::create_dir_all(destination)
         .map_err(|error| format!("Could not create extract folder: {error}"))?;
 
@@ -1899,6 +2037,102 @@ mod tests {
     fn sanitizes_windows_file_names() {
         assert_eq!(sanitize_file_stem("Ultra<Fast>:Plan?"), "Ultra_Fast__Plan_");
         assert_eq!(sanitize_file_stem("...   "), "power-plan");
+    }
+
+    #[test]
+    fn fpsheaven_download_folder_names_are_ascii() {
+        assert!(APP_DATA_FOLDER.is_ascii());
+        assert!(FPSHEAVEN_DOWNLOADS_FOLDER.is_ascii());
+        assert!(FPSHEAVEN_POWER_PLANS_FOLDER.is_ascii());
+        assert!(FPSHEAVEN_POWER_PLANS_ZIP_FILE.is_ascii());
+    }
+
+    #[test]
+    fn uses_local_app_data_when_available() {
+        let local_app_data = OsString::from("C:\\Users\\Player\\AppData\\Local");
+
+        assert_eq!(
+            fpsheaven_download_base_dir_from(Some(local_app_data.clone())),
+            PathBuf::from(local_app_data)
+        );
+    }
+
+    #[test]
+    fn falls_back_to_temp_when_local_app_data_is_missing() {
+        assert_eq!(fpsheaven_download_base_dir_from(None), env::temp_dir());
+    }
+
+    #[test]
+    fn creates_fpsheaven_download_dir_under_unicode_base_path() {
+        let root = env::temp_dir().join(format!(
+            "pp_ui_unicode_path_test_{}_{}",
+            process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let base = root.join("Ren\u{00e9}e A\u{00e7}\u{00e3}o \u{5c71}\u{7530} O'Neil");
+
+        let path = fpsheaven_download_dir_under(&base).unwrap();
+
+        assert_eq!(
+            path,
+            base.join(APP_DATA_FOLDER).join(FPSHEAVEN_DOWNLOADS_FOLDER)
+        );
+        assert!(path.exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn powershell_quotes_unicode_paths_and_apostrophes() {
+        let path = PathBuf::from(concat!(
+            "C:\\Users\\Ren\u{00e9}e A\u{00e7}\u{00e3}o \u{5c71}\u{7530} O'Neil",
+            "\\AppData\\Local\\Simple Power Plan Manager\\FPSHEAVEN Downloads",
+            "\\fpsheaven_powerplans.zip"
+        ));
+
+        assert_eq!(
+            ps_single_quote_path(&path),
+            concat!(
+                "'C:\\Users\\Ren\u{00e9}e A\u{00e7}\u{00e3}o \u{5c71}\u{7530} O''Neil",
+                "\\AppData\\Local\\Simple Power Plan Manager\\FPSHEAVEN Downloads",
+                "\\fpsheaven_powerplans.zip'"
+            )
+        );
+    }
+
+    #[test]
+    fn imports_power_plan_from_unicode_fallback_extract_path_as_native_arg() {
+        let root = env::temp_dir().join(format!(
+            "pp_ui_import_fallback_test_{}_{}",
+            process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let base = root.join("Temp \u{5c71}\u{7530} O'Neil");
+        let download_dir = fpsheaven_download_dir_under(&base).unwrap();
+        let extract_dir = download_dir.join(FPSHEAVEN_POWER_PLANS_FOLDER);
+        let nested_dir = extract_dir.join("nested");
+        let plan_path = nested_dir.join("fpsheaven2026_intel.pow");
+
+        fs::create_dir_all(&nested_dir).unwrap();
+        fs::write(&plan_path, b"").unwrap();
+
+        let found_path =
+            find_fpsheaven_power_plan(&extract_dir, FpsheavenPowerPlanKind::Intel).unwrap();
+        let guid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let args = import_power_plan_args(&found_path, Some(guid));
+
+        assert_eq!(found_path, plan_path);
+        assert_eq!(args[0], OsString::from("/import"));
+        assert_eq!(args[1], plan_path.as_os_str().to_os_string());
+        assert_eq!(args[2], OsString::from(guid));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
